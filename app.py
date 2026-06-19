@@ -10,6 +10,7 @@ import pandas as pd
 
 st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="centered")
 
+# --- 🎨 画面のデザイン設定 ---
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; color: #1a202c; }
@@ -26,6 +27,7 @@ st.markdown("""
 st.title("🗣️ AI音読システム Max Pro")
 st.write("画面に表示されている英文を読んで、録音して提出しよう！")
 
+# --- 1. 出席番号・班による負荷分散 ---
 attendance_type = st.radio(
     "あなたの 出席番号（または班） を選んでください：",
     ["奇数番号 (1, 3, 5...)", "偶数番号 (2, 4, 6...)"],
@@ -39,6 +41,8 @@ else:
 
 azure_region = st.secrets["AZURE_REGION"]
 
+
+# --- 2. Googleスプレッドシートからマスタを取得する機能 ---
 @st.cache_data(ttl=10)
 def load_master_data():
     try:
@@ -57,7 +61,8 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:E200").execute()
+        # F列（ファイルID）まで取得するために範囲を A2:F200 に拡大
+        result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
         mapping = {}
@@ -67,7 +72,11 @@ def load_master_data():
                 cls = row[1].strip()
                 unit = row[2].strip() if len(row) > 2 else "課題"
                 txt = row[3].strip() if len(row) > 3 else "English text here."
+                
+                # ⭕ ズレ修正：F列追加に伴い、E列[4]をパスワード、F列[5]をファイルIDとして正しく指定
                 pwd = row[4].strip() if len(row) > 4 else "sensei777"
+                file_id = row[5].strip() if len(row) > 5 else "記入不要"
+                
                 row_num = idx + 2
                 
                 if sch not in mapping: mapping[sch] = {}
@@ -79,6 +88,8 @@ def load_master_data():
 master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
+
+# --- 3. 生徒の個人情報入力 ---
 col1, col2, col3, col4 = st.columns(4)
 with col1: school_name = st.selectbox("学校名：", school_options)
 with col2:
@@ -96,6 +107,8 @@ st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
 st.markdown(f"<div style='font-size: 19px; font-weight: bold; line-height: 1.8; color: #000000; background-color: #ffffff; padding: 25px; border: 1px solid #cbd5e0; border-radius: 12px; white-space: pre-wrap;'>{teacher_text}</div>", unsafe_allow_html=True)
 st.markdown("---")
 
+
+# --- 4. 🎧 AIお手本音声の再生機能 ---
 with st.expander("🎧 AIのお手本音声を聴く"):
     if st.button("🔊 お手本を再生する"):
         with st.spinner("AI音声を生成中..."):
@@ -108,11 +121,14 @@ with st.expander("🎧 AIのお手本音声を聴く"):
                     st.audio(result.audio_data, format="audio/wav", autoplay=True)
             except Exception as tts_error: st.error(f"エラー: {tts_error}")
 
+
 st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 if "saved_results" not in st.session_state: st.session_state.saved_results = None
 
+
+# --- 5. Azure AI音声解析＆カタカナ検知ロジック ---
 if audio_value:
     if st.session_state.saved_results is None:
         st.info("AIが分析中... 🤖")
@@ -192,22 +208,53 @@ if audio_value:
                     except Exception as ge: st.error(f"❌ 送信失敗: {ge}")
 else: st.session_state.saved_results = None
 
+
+# --- 6. 🛠️ 先生用・管理者メニュー（課題の変更） ---
+st.markdown(" ")
 st.markdown(" ")
 with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）"):
+    st.write("自分が担当する学校とクラスを選んで、パスワードを入力してEnterを押してください。")
+    
     t_school = st.selectbox("管理する学校：", school_options, key="t_sch")
     t_class = st.selectbox("管理するクラス：", sorted(list(master_mapping.get(t_school, {}).keys())), key="t_cls")
+    
     target_class_info = master_mapping[t_school][t_class]
-    input_password = st.text_input("クラス用パスワードを入力：", type="password", key="t_pwd")
-    if input_password and input_password == target_class_info["password"]:
-        st.success("🔓 認証成功！")
-        new_unit = st.text_input("単元名：", value=target_class_info["unit"])
-        new_text = st.text_area("英文：", value=target_class_info["text"])
-        if st.button("🔄 このクラスの課題を更新する"):
-            try:
-                robot_email, client_id, formatted_private_key = st.secrets["ROBOT_EMAIL"], st.secrets["ROBOT_CLIENT_ID"], st.secrets["ROBOT_PRIVATE_KEY"]
-                info = {"type": "service_account", "project_id": "ai-ondoku-final-go", "private_key_id": "google_cloud_key", "private_key": formatted_private_key, "client_email": robot_email, "client_id": client_id, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"}
-                creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-                sheets_service = build('sheets', 'v4', credentials=creds)
-                sheets_service.spreadsheets().values().update(spreadsheetId=st.secrets["GOOGLE_SHEET_ID"], range=f"マスタ!C{target_class_info['row_num']}:D{target_class_info['row_num']}", valueInputOption="USER_ENTERED", body={'values': [[new_unit, new_text]]}).execute()
-                st.success("🎉 課題を更新しました！"); st.cache_data.clear(); st.rerun()
-            except Exception as update_err: st.error(f"❌ 更新失敗: {update_err}")
+    correct_password = target_class_info["password"]
+    
+    # 💡 パスワードを入力してEnterを押すと、その場で下の編集フォームが開くように設定
+    input_password = st.text_input("クラス用パスワードを入力（入力後Enter）：", type="password", key="t_pwd")
+    
+    if input_password:
+        if input_password == correct_password:
+            st.success(f"🔓 認証成功！ 【{t_school} {t_class}】の課題設定画面です。")
+            
+            new_unit = st.text_input("単元名：", value=target_class_info["unit"])
+            new_text = st.text_area("英文（生徒画面に表示）：", value=target_class_info["text"])
+            
+            if st.button("🔄 このクラスの課題を更新する"):
+                with st.spinner("スプレッドシートの課題を書き換え中..."):
+                    try:
+                        robot_email = st.secrets["ROBOT_EMAIL"]
+                        client_id = st.secrets["ROBOT_CLIENT_ID"]
+                        formatted_private_key = st.secrets["ROBOT_PRIVATE_KEY"]
+                        info = {"type": "service_account", "project_id": "ai-ondoku-final-go", "private_key_id": "google_cloud_key", "private_key": formatted_private_key, "client_email": robot_email, "client_id": client_id, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"}
+                        creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                        sheets_service = build('sheets', 'v4', credentials=creds)
+                        spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
+                        
+                        row_number = target_class_info["row_num"]
+                        update_range = f"マスタ!C{row_number}:D{row_number}"
+                        
+                        update_body = {'values': [[new_unit, new_text]]}
+                        sheets_service.spreadsheets().values().update(
+                            spreadsheetId=spreadsheet_id, range=update_range,
+                            valueInputOption="USER_ENTERED", body=update_body
+                        ).execute()
+                        
+                        st.success(f"🎉 {t_class}の課題を更新しました！")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as update_err:
+                        st.error(f"❌ スプレッドシートの更新に失敗しました: {update_err}")
+        else:
+            st.error("❌ パスワードが違います。")

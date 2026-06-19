@@ -1,0 +1,213 @@
+import streamlit as st
+import azure.cognitiveservices.speech as speechsdk
+import os
+import io
+from datetime import datetime, timedelta
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import pandas as pd
+
+st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="centered")
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #ffffff; color: #1a202c; }
+    h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
+    p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
+    .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
+        background-color: #ffffff !important; color: #000000 !important;
+        border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
+    }
+    .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🗣️ AI音読システム Max Pro")
+st.write("画面に表示されている英文を読んで、録音して提出しよう！")
+
+attendance_type = st.radio(
+    "あなたの 出席番号（または班） を選んでください：",
+    ["奇数番号 (1, 3, 5...)", "偶数番号 (2, 4, 6...)"],
+    horizontal=True
+)
+
+if "奇数" in attendance_type:
+    azure_key = st.secrets["KEY_KISU"]
+else:
+    azure_key = st.secrets["KEY_GUSU"]
+
+azure_region = st.secrets["AZURE_REGION"]
+
+@st.cache_data(ttl=10)
+def load_master_data():
+    try:
+        robot_email = st.secrets["ROBOT_EMAIL"]
+        client_id = st.secrets["ROBOT_CLIENT_ID"]
+        formatted_private_key = st.secrets["ROBOT_PRIVATE_KEY"]
+        
+        info = {
+            "type": "service_account", "project_id": "ai-ondoku-final-go",
+            "private_key_id": "google_cloud_key", "private_key": formatted_private_key,
+            "client_email": robot_email, "client_id": client_id,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
+        }
+        creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        sheets_service = build('sheets', 'v4', credentials=creds)
+        spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
+        
+        result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:E200").execute()
+        rows = result.get('values', [])
+        
+        mapping = {}
+        for idx, row in enumerate(rows):
+            if len(row) >= 2 and row[0] and row[1]:
+                sch = row[0].strip()
+                cls = row[1].strip()
+                unit = row[2].strip() if len(row) > 2 else "課題"
+                txt = row[3].strip() if len(row) > 3 else "English text here."
+                pwd = row[4].strip() if len(row) > 4 else "sensei777"
+                row_num = idx + 2
+                
+                if sch not in mapping: mapping[sch] = {}
+                mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "row_num": row_num}
+        return mapping
+    except Exception as e:
+        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "row_num": 2}}}
+
+master_mapping = load_master_data()
+school_options = sorted(list(master_mapping.keys()))
+
+col1, col2, col3, col4 = st.columns(4)
+with col1: school_name = st.selectbox("学校名：", school_options)
+with col2:
+    available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
+    class_name = st.selectbox("クラス：", available_classes)
+with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
+with col4: student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
+
+current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
+teacher_unit = current_class_data["unit"]
+teacher_text = current_class_data["text"]
+
+st.markdown("---")
+st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
+st.markdown(f"<div style='font-size: 19px; font-weight: bold; line-height: 1.8; color: #000000; background-color: #ffffff; padding: 25px; border: 1px solid #cbd5e0; border-radius: 12px; white-space: pre-wrap;'>{teacher_text}</div>", unsafe_allow_html=True)
+st.markdown("---")
+
+with st.expander("🎧 AIのお手本音声を聴く"):
+    if st.button("🔊 お手本を再生する"):
+        with st.spinner("AI音声を生成中..."):
+            try:
+                speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
+                speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+                speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+                result = speech_synthesizer.speak_text_async(teacher_text).get()
+                if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                    st.audio(result.audio_data, format="audio/wav", autoplay=True)
+            except Exception as tts_error: st.error(f"エラー: {tts_error}")
+
+st.subheader("🎤 録音スタート")
+audio_value = st.audio_input("ここを押して英語を読んでね")
+
+if "saved_results" not in st.session_state: st.session_state.saved_results = None
+
+if audio_value:
+    if st.session_state.saved_results is None:
+        st.info("AIが分析中... 🤖")
+        audio_bytes = audio_value.read()
+        with open("temp_audio.wav", "wb") as f: f.write(audio_bytes)
+        try:
+            speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
+            audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
+            pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA"}}')
+            pronunciation_config.enable_prosody_assessment()
+            speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+            pronunciation_config.apply_to(speech_recognizer)
+            result = speech_recognizer.recognize_once_async().get()
+            
+            if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                pron_result = speechsdk.PronunciationAssessmentResult(result)
+                score_acc = int(pron_result.accuracy_score)
+                score_flu = int(pron_result.fluency_score)
+                score_comp = int(pron_result.completeness_score)
+                score_pros = int(pron_result.prosody_score) if hasattr(pron_result, 'prosody_score') else 85
+                final_score = int((score_acc + score_flu + score_pros + score_comp) / 4)
+                
+                words_data, mispronounced_words, katakana_warnings = [], [], []
+                vowel_phonemes = ["u", "o", "a", "e", "i", "ɔ", "ə", "ɑ"]
+                for word in pron_result.words:
+                    words_data.append({"word": word.word, "error_type": word.error_type})
+                    if word.error_type == "Mispronunciation":
+                        mispronounced_words.append(word.word)
+                        if hasattr(word, 'phonemes'):
+                            for ph in word.phonemes:
+                                if ph.phoneme in vowel_phonemes and word.word.endswith(("t", "k", "d", "g", "p", "b", "s", "n", "m")):
+                                    katakana_warnings.append(f"**{word.word}**")
+                                    break
+                st.session_state.saved_results = {
+                    "final_score": final_score, "score_acc": score_acc, "score_flu": score_flu, "score_pros": score_pros, "score_comp": score_comp,
+                    "words_data": words_data, "mispronounced_words": mispronounced_words, "katakana_warnings": katakana_warnings, "audio_bytes": audio_bytes, "unit_name": teacher_unit
+                }
+        finally:
+            if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
+
+    if st.session_state.saved_results:
+        res = st.session_state.saved_results
+        st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
+        chart_data = pd.DataFrame({"観点": ["正確さ(音)", "流暢さ(スピード)", "抑揚(リズム)", "完成度(読み飛ばし)"], "スコア": [res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp']]})
+        st.bar_chart(chart_data.set_index("観点"))
+        
+        advice_text = ""
+        if res['katakana_warnings']: advice_text += f"💡 **カタカナ英語注意！** 最後は母音をつけずに子音だけで止める意識を！\n* 👉 {', '.join(list(set(res['katakana_warnings'])))}\n\n"
+        if res['final_score'] >= 85: advice_text += "🎯 すばらしい発音です！"
+        else: advice_text += "👍 ナイスチャレンジ！赤色の単語を聞き直してみよう。"
+        st.info(advice_text)
+        
+        st.markdown("---")
+        st.subheader("📮 先生への自動提出")
+        if not (school_name and class_name and student_num and student_name):
+            st.warning("⚠️ すべての項目を入力・選択してください。")
+        else:
+            if st.button("📤 この結果と音声を先生に提出する", type="primary"):
+                with st.spinner("送信中..."):
+                    try:
+                        robot_email, client_id, formatted_private_key = st.secrets["ROBOT_EMAIL"], st.secrets["ROBOT_CLIENT_ID"], st.secrets["ROBOT_PRIVATE_KEY"]
+                        info = {"type": "service_account", "project_id": "ai-ondoku-final-go", "private_key_id": "google_cloud_key", "private_key": formatted_private_key, "client_email": robot_email, "client_id": client_id, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"}
+                        creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/spreadsheets"])
+                        drive_service, sheets_service = build('drive', 'v3', credentials=creds), build('sheets', 'v4', credentials=creds)
+                        
+                        folder_id, spreadsheet_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"], st.secrets["GOOGLE_SHEET_ID"]
+                        filename = f"{school_name}_{class_name}_{student_num}番_{student_name}_{res['unit_name']}_{res['final_score']}点.wav"
+                        media = MediaIoBaseUpload(io.BytesIO(res['audio_bytes']), mimetype='audio/wav')
+                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
+                        
+                        audio_link = f"https://drive.google.com/file/d/{uploaded_file.get('id')}/view?usp=drivesdk"
+                        now_jst = datetime.utcnow() + timedelta(hours=9)
+                        row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
+                        
+                        sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
+                        st.balloons(); st.success("🎉 提出が完了しました！"); st.session_state.saved_results = None
+                    except Exception as ge: st.error(f"❌ 送信失敗: {ge}")
+else: st.session_state.saved_results = None
+
+st.markdown(" ")
+with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）"):
+    t_school = st.selectbox("管理する学校：", school_options, key="t_sch")
+    t_class = st.selectbox("管理するクラス：", sorted(list(master_mapping.get(t_school, {}).keys())), key="t_cls")
+    target_class_info = master_mapping[t_school][t_class]
+    input_password = st.text_input("クラス用パスワードを入力：", type="password", key="t_pwd")
+    if input_password and input_password == target_class_info["password"]:
+        st.success("🔓 認証成功！")
+        new_unit = st.text_input("単元名：", value=target_class_info["unit"])
+        new_text = st.text_area("英文：", value=target_class_info["text"])
+        if st.button("🔄 このクラスの課題を更新する"):
+            try:
+                robot_email, client_id, formatted_private_key = st.secrets["ROBOT_EMAIL"], st.secrets["ROBOT_CLIENT_ID"], st.secrets["ROBOT_PRIVATE_KEY"]
+                info = {"type": "service_account", "project_id": "ai-ondoku-final-go", "private_key_id": "google_cloud_key", "private_key": formatted_private_key, "client_email": robot_email, "client_id": client_id, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"}
+                creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                sheets_service = build('sheets', 'v4', credentials=creds)
+                sheets_service.spreadsheets().values().update(spreadsheetId=st.secrets["GOOGLE_SHEET_ID"], range=f"マスタ!C{target_class_info['row_num']}:D{target_class_info['row_num']}", valueInputOption="USER_ENTERED", body={'values': [[new_unit, new_text]]}).execute()
+                st.success("🎉 課題を更新しました！"); st.cache_data.clear(); st.rerun()
+            except Exception as update_err: st.error(f"❌ 更新失敗: {update_err}")

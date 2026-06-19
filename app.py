@@ -61,7 +61,7 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        # F列（ファイルID）まで取得するために範囲を A2:F200 に拡大
+        # F列（ファイルID）まで取得するために範囲を A2:F200 に指定
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -70,12 +70,10 @@ def load_master_data():
             if len(row) >= 2 and row[0] and row[1]:
                 sch = row[0].strip()
                 cls = row[1].strip()
-                unit = row[2].strip() if len(row) > 2 else "課題"
-                txt = row[3].strip() if len(row) > 3 else "English text here."
-                
-                # ⭕ ズレ修正：F列追加に伴い、E列[4]をパスワード、F列[5]をファイルIDとして正しく指定
-                pwd = row[4].strip() if len(row) > 4 else "sensei777"
-                file_id = row[5].strip() if len(row) > 5 else "記入不要"
+                unit = row[2].strip() if len(row) > 2 and row[2] else "課題"
+                txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
+                pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
+                file_id = row[5].strip() if len(row) > 5 and row[5] else "記入不要"
                 
                 row_num = idx + 2
                 
@@ -125,14 +123,15 @@ with st.expander("🎧 AIのお手本音声を聴く"):
 st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
-if "saved_results" not in st.session_state: st.session_state.saved_results = None
-
 
 # --- 5. Azure AI音声解析＆カタカナ検知ロジック ---
 if audio_value:
-    if st.session_state.saved_results is None:
+    audio_bytes = audio_value.read()
+    
+    # 【点数固定ロジック】過去の録音と違う、またはまだ計算していない場合だけAIを動かす
+    if "current_audio_bytes" not in st.session_state or st.session_state.current_audio_bytes != audio_bytes:
+        st.session_state.current_audio_bytes = audio_bytes
         st.info("AIが分析中... 🤖")
-        audio_bytes = audio_value.read()
         with open("temp_audio.wav", "wb") as f: f.write(audio_bytes)
         try:
             speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
@@ -162,6 +161,7 @@ if audio_value:
                                 if ph.phoneme in vowel_phonemes and word.word.endswith(("t", "k", "d", "g", "p", "b", "s", "n", "m")):
                                     katakana_warnings.append(f"**{word.word}**")
                                     break
+                
                 st.session_state.saved_results = {
                     "final_score": final_score, "score_acc": score_acc, "score_flu": score_flu, "score_pros": score_pros, "score_comp": score_comp,
                     "words_data": words_data, "mispronounced_words": mispronounced_words, "katakana_warnings": katakana_warnings, "audio_bytes": audio_bytes, "unit_name": teacher_unit
@@ -169,7 +169,8 @@ if audio_value:
         finally:
             if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
 
-    if st.session_state.saved_results:
+    # 固定された結果を画面に表示する
+    if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
         chart_data = pd.DataFrame({"観点": ["正確さ(音)", "流暢さ(スピード)", "抑揚(リズム)", "完成度(読み飛ばし)"], "スコア": [res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp']]})
@@ -204,9 +205,15 @@ if audio_value:
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
                         sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
-                        st.balloons(); st.success("🎉 提出が完了しました！"); st.session_state.saved_results = None
+                        st.balloons(); st.success("🎉 提出が完了しました！")
+                        
+                        if "saved_results" in st.session_state: del st.session_state.saved_results
+                        if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
+                        st.rerun()
                     except Exception as ge: st.error(f"❌ 送信失敗: {ge}")
-else: st.session_state.saved_results = None
+else:
+    if "saved_results" in st.session_state: del st.session_state.saved_results
+    if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
 
 
 # --- 6. 🛠️ 先生用・管理者メニュー（課題の変更） ---
@@ -221,7 +228,7 @@ with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）
     target_class_info = master_mapping[t_school][t_class]
     correct_password = target_class_info["password"]
     
-    # 💡 パスワードを入力してEnterを押すと、その場で下の編集フォームが開くように設定
+    # 💡 パスワードを入力してEnterを押すと、即座に下の編集フォームが開く設定
     input_password = st.text_input("クラス用パスワードを入力（入力後Enter）：", type="password", key="t_pwd")
     
     if input_password:

@@ -13,17 +13,42 @@ st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="cent
 # --- 🎨 画面のデザイン設定 ---
 st.markdown("""
     <style>
+    /* 全体の基本設定 */
     .stApp { background-color: #ffffff; color: #1a202c; }
     h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
     p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
-    .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
-        background-color: #ffffff !important; color: #000000 !important;
-        border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
+    
+    /* ⭕ プルダウンを閉じてる時の枠（白背景に黒文字で強制固定） */
+    .stSelectbox>div>div>div, .stTextInput>div>div>input, .stTextArea>div>textarea {
+        background-color: #ffffff !important; 
+        color: #000000 !important;
+        border: 2px solid #cbd5e0 !important; 
+        border-radius: 8px !important;
     }
+    
+    /* ⭕ プルダウンを開いた時の「選択肢のリスト全体の背景」を真っ白に強制固定 */
+    div[data-baseweb="popover"] {
+        background-color: #ffffff !important;
+    }
+    div[data-baseweb="popover"] ul {
+        background-color: #ffffff !important;
+    }
+    
+    /* ⭕ 選択肢の「1文字1文字」を真っ黒に強制固定 */
+    div[data-baseweb="popover"] li {
+        color: #000000 !important; 
+        background-color: #ffffff !important;
+    }
+    
+    /* ⭕ マウスを乗せたり、スマホでタップした選択肢の背景を「薄いグレー」にする */
+    div[data-baseweb="popover"] li:hover {
+        background-color: #edf2f7 !important;
+        color: #000000 !important;
+    }
+
     .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
     </style>
 """, unsafe_allow_html=True)
-
 st.title("🗣️ AI音読システム Max Pro")
 st.write("画面に表示されている英文を読んで、録音して提出しよう！")
 

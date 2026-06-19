@@ -1,5 +1,3 @@
 streamlit
-pandas
-google-genai
-gspread
-oauth2client
+azure-cognitiveservices-speech
+google-api-python-client google-auth-httplib2 google-auth-oauthlib pandas

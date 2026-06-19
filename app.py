@@ -61,7 +61,6 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        # F列（ファイルID）まで取得するために範囲を A2:F200 に指定
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -128,7 +127,6 @@ audio_value = st.audio_input("ここを押して英語を読んでね")
 if audio_value:
     audio_bytes = audio_value.read()
     
-    # 【点数固定ロジック】過去の録音と違う、またはまだ計算していない場合だけAIを動かす
     if "current_audio_bytes" not in st.session_state or st.session_state.current_audio_bytes != audio_bytes:
         st.session_state.current_audio_bytes = audio_bytes
         st.info("AIが分析中... 🤖")
@@ -173,6 +171,23 @@ if audio_value:
     if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
+        
+        # ⭕【復活！】単語ごとの赤字・緑字カラー判定＆表示システム
+        colored_html = "<div style='font-size: 22px; line-height: 2.0; background-color: #f8fafc; padding: 20px; border-radius: 10px; margin-top: 15px; border: 1px solid #e2e8f0; color: #000000;'>"
+        for w_info in res["words_data"]:
+            w_text = w_info["word"]
+            err_t = w_info["error_type"]
+            if err_t == "None":
+                colored_html += f"<span style='color: #2f855a; font-weight: bold;'>{w_text} </span>"  # 正解は緑
+            elif err_t == "Mispronunciation":
+                colored_html += f"<span style='color: #e53e3e; font-weight: bold; text-decoration: underline;'>{w_text} </span>"  # ミスは赤＋下線
+            elif err_t == "Omission":
+                colored_html += f"<span style='color: #718096; text-decoration: line-through;'>{w_text} </span>"  # 読み飛ばしは灰色＋打ち消し線
+            else:
+                colored_html += f"<span style='color: #dd6b20;'>{w_text} </span>"  # その他はオレンジ
+        colored_html += "</div>"
+        st.markdown(colored_html, unsafe_allow_html=True)
+        
         chart_data = pd.DataFrame({"観点": ["正確さ(音)", "流暢さ(スピード)", "抑揚(リズム)", "完成度(読み飛ばし)"], "スコア": [res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp']]})
         st.bar_chart(chart_data.set_index("観点"))
         
@@ -228,7 +243,6 @@ with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）
     target_class_info = master_mapping[t_school][t_class]
     correct_password = target_class_info["password"]
     
-    # 💡 パスワードを入力してEnterを押すと、即座に下の編集フォームが開く設定
     input_password = st.text_input("クラス用パスワードを入力（入力後Enter）：", type="password", key="t_pwd")
     
     if input_password:

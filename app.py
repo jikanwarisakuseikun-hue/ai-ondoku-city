@@ -117,7 +117,10 @@ with col1: school_name = st.selectbox("学校名：", school_options)
 with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
-with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
+with col3: 
+    # ⭕ 出席番号を手入力から「01〜40」のプルダウンに変更
+    num_options = [f"{i:02d}" for i in range(1, 41)]  # 01, 02, ..., 40 を自動生成
+    student_num = st.selectbox("出席番号：", num_options)
 with col4: student_name = st.text_input("イニシャル：", placeholder="例: AT")
 
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})

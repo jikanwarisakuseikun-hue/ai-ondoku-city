@@ -12,33 +12,21 @@ import pandas as pd
 
 st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="centered")
 
-# --- 🎨 画面のデザイン設定（プルダウン白地黒地・強制固定） ---
+# --- 🎨 画面のデザイン設定 ---
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; color: #1a202c; }
     h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
     p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
     
-    /* 入力ボックス枠線と文字色の固定 */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
         background-color: #ffffff !important; color: #000000 !important;
         border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
     }
     
-    /* プルダウンの選択肢（リスト展開時）を絶対に白地・黒文字にする */
-    div[data-baseweb="popover"] ul {
-        background-color: #ffffff !important;
-    }
-    div[data-baseweb="popover"] li {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-    }
-    /* 選択肢にマウスを乗せたときのホバー色 */
-    div[data-baseweb="popover"] li:hover {
-        background-color: #edf2f7 !important;
-        color: #000000 !important;
-    }
-
+    div[data-baseweb="popover"] ul { background-color: #ffffff !important; }
+    div[data-baseweb="popover"] li { background-color: #ffffff !important; color: #000000 !important; }
+    div[data-baseweb="popover"] li:hover { background-color: #edf2f7 !important; color: #000000 !important; }
     .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
     </style>
 """, unsafe_allow_html=True)
@@ -80,7 +68,8 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
+        # 💡 G列（音声フォルダID）までまとめて一気に取得
+        result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:G200").execute()
         rows = result.get('values', [])
         
         mapping = {}
@@ -92,27 +81,30 @@ def load_master_data():
                 txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
                 pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
                 
-                # F列からフォルダIDを取得。空欄や日本語（記入不要など）なら「None」にしておく
-                raw_f_id = row[5].strip() if len(row) > 5 and row[5] else ""
-                # 💡【強化判定】フォルダIDは通常、英数字とハイフン・アンダースコアのみの塊（25文字以上）
-                if raw_f_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_f_id):
-                    f_id = raw_f_id
-                else:
-                    f_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+                # 💡 F列から各校固有のスプレッドシートIDを取得
+                raw_ss_id = row[5].strip() if len(row) > 5 and row[5] else ""
+                ss_id = raw_ss_id if raw_ss_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_ss_id) else st.secrets["GOOGLE_SHEET_ID"]
+                
+                # 💡 G列から各校固有の音声フォルダIDを取得
+                raw_f_id = row[6].strip() if len(row) > 6 and row[6] else ""
+                f_id = raw_f_id if raw_f_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_f_id) else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
                 
                 row_num = idx + 2
                 
                 if sch not in mapping: mapping[sch] = {}
-                mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "folder_id": f_id, "row_num": row_num}
+                mapping[sch][cls] = {
+                    "unit": unit, "text": txt, "password": pwd, 
+                    "school_sheet_id": ss_id, "school_folder_id": f_id, "row_num": row_num
+                }
         return mapping
     except Exception as e:
-        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 2}}}
+        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome.", "password": "pass", "school_sheet_id": st.secrets["GOOGLE_SHEET_ID"], "school_folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 2}}}
 
 master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
 
-# --- 3. 生徒の個人情報入力（URLパラメータによる学校名自動ロック機能付き） ---
+# --- 3. 生徒の個人情報入力 ---
 query_params = st.query_params
 param_school = query_params.get("school", None)
 
@@ -130,12 +122,15 @@ with col3:
     selected_num_text = st.selectbox("出席番号：", num_options)
     student_num = selected_num_text.replace("番", "")
 with col4: 
-    student_name = st.text_input("イニシャル：", placeholder="例: TS")
+    student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
 
-current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 0})
+current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文なし", "password": "none", "school_sheet_id": st.secrets["GOOGLE_SHEET_ID"], "school_folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
-school_folder_id = current_class_data["folder_id"]
+
+# 💡 動的に仕分けるための学校個別ターゲットIDをセット
+target_school_sheet_id = current_class_data["school_sheet_id"]
+target_school_folder_id = current_class_data["school_folder_id"]
 
 st.markdown("---")
 st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
@@ -146,7 +141,7 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック ---
+# --- 4. Azure AI音声解析 ＆ 4秒S0自動避難ロジック（短縮化完了） ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -161,7 +156,7 @@ if audio_value:
             
         try:
             start_time = time.time()
-            timeout_limit = 12.0
+            timeout_limit = 4.0  # 💡 5秒の英文に合わせて4秒に短縮！これで遅い時は一瞬でS0へ避難します
             final_key = initial_key  
             
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
@@ -185,7 +180,7 @@ if audio_value:
                 if elapsed_time >= timeout_limit:
                     is_timeout = True
                     break
-                time.sleep(0.2)
+                time.sleep(0.1)
             
             if is_timeout:
                 status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
@@ -228,7 +223,7 @@ if audio_value:
         finally:
             if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
 
-    # --- 🔒 5. 点数固定 ＆ 中学生やる気マックス応援アドバイスの表示 ---
+    # --- 🔒 5. 点数固定 ＆ 中学生応援アドバイス ---
     if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
@@ -237,14 +232,10 @@ if audio_value:
         for w_info in res["words_data"]:
             w_text = w_info["word"]
             err_t = w_info["error_type"]
-            if err_t == "None":
-                colored_html += f"<span style='color: #2f855a; font-weight: bold;'>{w_text} </span>"
-            elif err_t == "Mispronunciation":
-                colored_html += f"<span style='color: #e53e3e; font-weight: bold; text-decoration: underline;'>{w_text} </span>"
-            elif err_t == "Omission":
-                colored_html += f"<span style='color: #718096; text-decoration: line-through;'>{w_text} </span>"
-            else:
-                colored_html += f"<span style='color: #dd6b20;'>{w_text} </span>"
+            if err_t == "None": colored_html += f"<span style='color: #2f855a; font-weight: bold;'>{w_text} </span>"
+            elif err_t == "Mispronunciation": colored_html += f"<span style='color: #e53e3e; font-weight: bold; text-decoration: underline;'>{w_text} </span>"
+            elif err_t == "Omission": colored_html += f"<span style='color: #718096; text-decoration: line-through;'>{w_text} </span>"
+            else: colored_html += f"<span style='color: #dd6b20;'>{w_text} </span>"
         colored_html += "</div>"
         st.markdown(colored_html, unsafe_allow_html=True)
         
@@ -254,35 +245,23 @@ if audio_value:
         st.markdown("---")
         st.markdown("### 🗣️ AIアドバイザーからのメッセージ")
         
-        scores = {
-            "声の出し方（ハッキリ度）": res['score_acc'],
-            "スピード（なめらかさ）": res['score_flu'],
-            "リズム（英語らしい強弱）": res['score_pros'],
-            "読み忘れ（最後まで）": res['score_comp']
-        }
+        scores = {"声の出し方（ハッキリ度）": res['score_acc'], "スピード（なめらかさ）": res['score_flu'], "リズム（英語らしい強弱）": res['score_pros'], "読み忘れ（最後まで）": res['score_comp']}
         weak_point = min(scores, key=scores.get)
         advice_details = ""
         
         if res['katakana_warnings']:
             advice_details += f"📢 **おっと！もったいないポイント発見！**\n単語のうしろに余計な「う」や「お」の音がくっついて、ローマ字読み（カタカナ）になっている部分があるよ。\n言葉の終わりで口をピタッと止めて、息だけで「サッ」と終わらせるイメージで言ってみよう！\n* 👉 **注意する単語：** {', '.join(list(set(res['katakana_warnings'])))}\n\n"
         
-        if res['final_score'] >= 90:
-            advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点】の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
-        elif res['final_score'] >= 80:
-            advice_details += f"✨ **うおー！めっちゃうまい！【{res['final_score']}点】のハイレベル合格！**\n声がしっかりAIに届いているよ。あとほんの少しの「コツ」で、夢の90点オーバー・満点が狙えるぞ。次が本番だ！\n\n"
-        else:
-            advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！今のはまだ練習の第１歩。ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
+        if res['final_score'] >= 90: advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点】の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
+        elif res['final_score'] >= 80: advice_details += f"✨ **うおー！めっちゃうまい！【{res['final_score']}点】のハイレベル合格！**\n声がしっかりAIに届いているよ。あとほんの少しの「コツ」で、夢の90点オーバー・満点が狙えるぞ。次が本番だ！\n\n"
+        else: advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
             
         if res['final_score'] < 85:
             advice_details += f"🎯 **【次に10点アップするための、まほうの裏ワザ】**\n"
-            if weak_point == "声の出し方（ハッキリ度）":
-                advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
-            elif weak_point == "スピード（なめらかさ）":
-                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止っちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
-            elif weak_point == "リズム（英語らしい強弱）":
-                advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
-            elif weak_point == "読み忘れ（最後まで）":
-                advice_details += "👉 **『ゴールラインまで全力ダッシュ作戦』で行こう！**\n画面の「灰色の文字」は、AIが聞き取れなかった（読み飛ばしちゃった）ところだよ。恥ずかしがらずに、文の最後のピリオドまで、1つずつの単語を丁寧にハッキリ声に出してみてね！"
+            if weak_point == "声の出し方（ハッキリ度）": advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
+            elif weak_point == "スピード（なめらかさ）": advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止っちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
+            elif weak_point == "リズム（英語らしい強弱）": advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
+            elif weak_point == "読み忘れ（最後まで）": advice_details += "👉 **『ゴールラインまで全力ダッシュ作戦』で行こう！**\n画面の「灰色の文字」は、AIが聞き取れなかった（読み飛ばしちゃった）ところだよ。恥ずかしがらずに、文の最後のピリオドまで、1つずつの単語を丁寧にハッキリ声に出してみてね！"
         
         st.info(advice_details)
         
@@ -292,28 +271,36 @@ if audio_value:
             st.warning("⚠️ すべての項目を入力・選択してください。")
         else:
             if st.button("📤 この結果と音声を先生に提出する", type="primary"):
-                with st.spinner("送信中..."):
+                with st.spinner("学校ごとの専用ドライブへ送信中..."):
                     try:
                         robot_email, client_id, formatted_private_key = st.secrets["ROBOT_EMAIL"], st.secrets["ROBOT_CLIENT_ID"], st.secrets["ROBOT_PRIVATE_KEY"]
                         info = {"type": "service_account", "project_id": "ai-ondoku-final-go", "private_key_id": "google_cloud_key", "private_key": formatted_private_key, "client_email": robot_email, "client_id": client_id, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"}
                         creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/spreadsheets"])
                         drive_service, sheets_service = build('drive', 'v3', credentials=creds), build('sheets', 'v4', credentials=creds)
                         
-                        spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
                         filename = f"{school_name}_{class_name}_{student_num}番_{student_name}_{res['unit_name']}_{res['final_score']}点.wav"
                         media = MediaIoBaseUpload(io.BytesIO(res['audio_bytes']), mimetype='audio/wav')
                         
-                        # 💡 二重チェック：もし何らかの理由で学校用フォルダIDが正常な英数字でなければデフォルトに強制置換
-                        target_folder_id = school_folder_id if re.match(r'^[a-zA-Z0-9\-_]{25,}$', school_folder_id) else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
-                        
-                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [target_folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
+                        # 💡 1. 音声ファイルをマスタG列指定の「学校個別フォルダ」へアップロード
+                        uploaded_file = drive_service.files().create(
+                            body={'name': filename, 'parents': [target_school_folder_id]}, 
+                            media_body=media, fields='id', supportsAllDrives=True
+                        ).execute()
                         
                         audio_link = f"https://drive.google.com/file/d/{uploaded_file.get('id')}/view?usp=drivesdk"
                         now_jst = datetime.utcnow() + timedelta(hours=9)
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
-                        sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
-                        st.balloons(); st.success("🎉 提出が完了しました！")
+                        # 💡 2. 文字データをマスタF列指定の「学校個別スプレッドシート」の、該当学校名タブへ直接書き込み！
+                        sheets_service.spreadsheets().values().append(
+                            spreadsheetId=target_school_sheet_id, 
+                            range=f"{school_name}!A:L", 
+                            valueInputOption="USER_ENTERED", 
+                            insertDataOption="INSERT_ROWS", 
+                            body={'values': [row_data]}
+                        ).execute()
+                        
+                        st.balloons(); st.success("🎉 学校別専用ドライブへの提出がすべて完了しました！")
                         
                         if "saved_results" in st.session_state: del st.session_state.saved_results
                         if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
@@ -324,7 +311,7 @@ else:
     if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
 
 
-# --- 6. 🛠️ 先生用・管理者メニュー（課題の変更） ---
+# --- 6. 🛠️ 先生用・管理者メニュー ---
 st.markdown(" ")
 st.markdown(" ")
 with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）"):

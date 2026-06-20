@@ -79,6 +79,7 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
+        # 💡 F列（フォルダID）までまとめて取得するように拡張
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -90,14 +91,16 @@ def load_master_data():
                 unit = row[2].strip() if len(row) > 2 and row[2] else "課題"
                 txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
                 pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
+                # F列からフォルダIDを取得。未入力なら環境変数のデフォルト値を使う
+                f_id = row[5].strip() if len(row) > 5 and row[5] else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
                 
                 row_num = idx + 2
                 
                 if sch not in mapping: mapping[sch] = {}
-                mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "row_num": row_num}
+                mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "folder_id": f_id, "row_num": row_num}
         return mapping
     except Exception as e:
-        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "row_num": 2}}}
+        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "folder_id": "default", "row_num": 2}}}
 
 master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
@@ -123,9 +126,11 @@ with col3:
 with col4: 
     student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
 
-current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
+# 現在選択されているクラスのマスタデータを抽出
+current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
+school_folder_id = current_class_data["folder_id"] # 💡 これが各校個別のフォルダIDになります
 
 st.markdown("---")
 st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
@@ -136,7 +141,7 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック（修正版） ---
+# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -167,7 +172,6 @@ if audio_value:
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
             
-            # 🛠️ 【修正】競合や例外を起こさないよう、Azure SDK公式の_is_done内部フラグで監視
             recognition_future = speech_recognizer.recognize_once_async()
             
             is_timeout = False
@@ -180,7 +184,6 @@ if audio_value:
             
             if is_timeout:
                 status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
-                # タイムアウト時は安全に優先ルートのキーで再試行
                 final_key = st.secrets["KEY_S0"]
                 speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
                 speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
@@ -270,7 +273,7 @@ if audio_value:
             if weak_point == "声の出し方（ハッキリ度）":
                 advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
             elif weak_point == "スピード（なめらかさ）":
-                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止まっちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
+                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止っちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
             elif weak_point == "リズム（英語らしい強弱）":
                 advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
             elif weak_point == "読み忘れ（最後まで）":
@@ -291,10 +294,12 @@ if audio_value:
                         creds = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/spreadsheets"])
                         drive_service, sheets_service = build('drive', 'v3', credentials=creds), build('sheets', 'v4', credentials=creds)
                         
-                        folder_id, spreadsheet_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"], st.secrets["GOOGLE_SHEET_ID"]
+                        spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
                         filename = f"{school_name}_{class_name}_{student_num}番_{student_name}_{res['unit_name']}_{res['final_score']}点.wav"
                         media = MediaIoBaseUpload(io.BytesIO(res['audio_bytes']), mimetype='audio/wav')
-                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
+                        
+                        # 💡 固定の folder_id ではなく、マスタから読んだ各校固有の school_folder_id へ送信！
+                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [school_folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
                         
                         audio_link = f"https://drive.google.com/file/d/{uploaded_file.get('id')}/view?usp=drivesdk"
                         now_jst = datetime.utcnow() + timedelta(hours=9)

@@ -11,21 +11,36 @@ import pandas as pd
 
 st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="centered")
 
-# --- 🎨 画面のデザイン設定 ---
+# --- 🎨 画面のデザイン設定（プルダウン強化版） ---
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; color: #1a202c; }
     h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
     p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
+    
+    /* 既存の入力ボックス枠線設定 */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
         background-color: #ffffff !important; color: #000000 !important;
         border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
     }
+    
+    /* 👇【ここを追加】プルダウンの選択肢（リスト展開時）を絶対に白地・黒文字にする */
+    div[data-baseweb="popover"] ul {
+        background-color: #ffffff !important;
+    }
+    div[data-baseweb="popover"] li {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+    /* 選択肢にマウスを乗せた（ホバーした）ときの色もグレー背景に黒文字で固定 */
+    div[data-baseweb="popover"] li:hover {
+        background-color: #edf2f7 !important;
+        color: #000000 !important;
+    }
+
     .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
     </style>
-""", unsafe_allow_html=True)
-
-st.title("🗣️ AI音読システム Max Pro")
+""", unsafe_allow_html=True)st.title("🗣️ AI音読システム Max Pro")
 st.write("画面に表示されている英文を読んで、録音して提出しよう！")
 
 # --- 1. 出席番号による初期ルートの負荷分散 ---

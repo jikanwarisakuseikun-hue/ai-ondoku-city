@@ -68,7 +68,7 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        # 💡 G列（音声フォルダID）までまとめて一気に取得
+        # G列（音声フォルダID）までまとめて一気に取得
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:G200").execute()
         rows = result.get('values', [])
         
@@ -81,11 +81,11 @@ def load_master_data():
                 txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
                 pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
                 
-                # 💡 F列から各校固有のスプレッドシートIDを取得
+                # F列から各校固有のスプレッドシートIDを取得
                 raw_ss_id = row[5].strip() if len(row) > 5 and row[5] else ""
                 ss_id = raw_ss_id if raw_ss_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_ss_id) else st.secrets["GOOGLE_SHEET_ID"]
                 
-                # 💡 G列から各校固有の音声フォルダIDを取得
+                # G列から各校固有の音声フォルダIDを取得
                 raw_f_id = row[6].strip() if len(row) > 6 and row[6] else ""
                 f_id = raw_f_id if raw_f_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_f_id) else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
                 
@@ -128,7 +128,7 @@ current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit"
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
 
-# 💡 動的に仕分けるための学校個別ターゲットIDをセット
+# 動的に仕分けるための学校個別ターゲットIDをセット
 target_school_sheet_id = current_class_data["school_sheet_id"]
 target_school_folder_id = current_class_data["school_folder_id"]
 
@@ -141,7 +141,7 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 4. Azure AI音声解析 ＆ 4秒S0自動避難ロジック（短縮化完了） ---
+# --- 4. Azure AI音声解析 ＆ 4秒S0自動避難ロジック ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -156,7 +156,7 @@ if audio_value:
             
         try:
             start_time = time.time()
-            timeout_limit = 4.0  # 💡 5秒の英文に合わせて4秒に短縮！これで遅い時は一瞬でS0へ避難します
+            timeout_limit = 4.0  # 4秒に短縮して体感スピードアップ
             final_key = initial_key  
             
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
@@ -252,9 +252,9 @@ if audio_value:
         if res['katakana_warnings']:
             advice_details += f"📢 **おっと！もったいないポイント発見！**\n単語のうしろに余計な「う」や「お」の音がくっついて、ローマ字読み（カタカナ）になっている部分があるよ。\n言葉の終わりで口をピタッと止めて、息だけで「サッ」と終わらせるイメージで言ってみよう！\n* 👉 **注意する単語：** {', '.join(list(set(res['katakana_warnings'])))}\n\n"
         
-        if res['final_score'] >= 90: advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点】の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
+        if res['final_score'] >= 90: advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点']の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
         elif res['final_score'] >= 80: advice_details += f"✨ **うおー！めっちゃうまい！【{res['final_score']}点】のハイレベル合格！**\n声がしっかりAIに届いているよ。あとほんの少しの「コツ」で、夢の90点オーバー・満点が狙えるぞ。次が本番だ！\n\n"
-        else: advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
+        else: advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！今のはまだ練習の第１歩。ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
             
         if res['final_score'] < 85:
             advice_details += f"🎯 **【次に10点アップするための、まほうの裏ワザ】**\n"
@@ -281,7 +281,7 @@ if audio_value:
                         filename = f"{school_name}_{class_name}_{student_num}番_{student_name}_{res['unit_name']}_{res['final_score']}点.wav"
                         media = MediaIoBaseUpload(io.BytesIO(res['audio_bytes']), mimetype='audio/wav')
                         
-                        # 💡 1. 音声ファイルをマスタG列指定の「学校個別フォルダ」へアップロード
+                        # 1. 音声ファイルをマスタG列指定の「学校個別フォルダ」へアップロード
                         uploaded_file = drive_service.files().create(
                             body={'name': filename, 'parents': [target_school_folder_id]}, 
                             media_body=media, fields='id', supportsAllDrives=True
@@ -291,7 +291,7 @@ if audio_value:
                         now_jst = datetime.utcnow() + timedelta(hours=9)
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
-                        # 💡 2. 文字データをマスタF列指定の「学校個別スプレッドシート」の、該当学校名タブへ直接書き込み！
+                        # 2. 文字データをマスタF列指定の「学校個別スプレッドシート」の、該当学校名タブへ直接書き込み
                         sheets_service.spreadsheets().values().append(
                             spreadsheetId=target_school_sheet_id, 
                             range=f"{school_name}!A:L", 
@@ -300,11 +300,22 @@ if audio_value:
                             body={'values': [row_data]}
                         ).execute()
                         
-                        st.balloons(); st.success("🎉 学校別専用ドライブへの提出がすべて完了しました！")
+                        # 💡 画面をパッと戻さず、提出完了メッセージを固定表示！
+                        st.balloons()
+                        st.markdown("""
+                            <div style="background-color: #ebf8ff; border: 2px solid #3182ce; padding: 30px; border-radius: 15px; text-align: center; margin-top: 20px;">
+                                <h2 style="color: #2b6cb0 !important; margin-bottom: 10px;">🎉 提出がかんりょうしました！</h2>
+                                <p style="color: #2d3748 !important; font-size: 20px; font-weight: bold;">
+                                    先生のパソコン（スプレッドシート）にデータと音声がぶじに届きました。<br>
+                                    タブやブラウザを閉じて、クロームブック（タブレット）をかたづけてね！
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                         
+                        # セッション情報のクリア（二重送信防止用）
                         if "saved_results" in st.session_state: del st.session_state.saved_results
                         if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
-                        st.rerun()
+                        
                     except Exception as ge: st.error(f"❌ 送信失敗: {ge}")
 else:
     if "saved_results" in st.session_state: del st.session_state.saved_results

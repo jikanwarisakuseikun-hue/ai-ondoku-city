@@ -11,20 +11,20 @@ import pandas as pd
 
 st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="centered")
 
-# --- 🎨 画面のデザイン設定（プルダウン強化版） ---
+# --- 🎨 画面のデザイン設定（プルダウン白地黒地・強制固定） ---
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; color: #1a202c; }
     h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
     p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
     
-    /* 既存の入力ボックス枠線設定 */
+    /* 入力ボックス枠線と文字色の固定 */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
         background-color: #ffffff !important; color: #000000 !important;
         border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
     }
     
-    /* 👇【ここを追加】プルダウンの選択肢（リスト展開時）を絶対に白地・黒文字にする */
+    /* プルダウンの選択肢（リスト展開時）を絶対に白地・黒文字にする */
     div[data-baseweb="popover"] ul {
         background-color: #ffffff !important;
     }
@@ -32,7 +32,7 @@ st.markdown("""
         background-color: #ffffff !important;
         color: #000000 !important;
     }
-    /* 選択肢にマウスを乗せた（ホバーした）ときの色もグレー背景に黒文字で固定 */
+    /* 選択肢にマウスを乗せたときのホバー色 */
     div[data-baseweb="popover"] li:hover {
         background-color: #edf2f7 !important;
         color: #000000 !important;
@@ -40,8 +40,10 @@ st.markdown("""
 
     .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
     </style>
-""", unsafe_allow_html=True)st.title("🗣️ AI音読システム Max Pro")
-st.write("画面に表示されている英文を読んで、録音して提出しよう！")
+""", unsafe_allow_html=True)
+
+st.title("🗣️ AI音読システム Max Pro")
+st.write("デジタル教科書のお手本をよく聴いてから、録音して提出しよう！")
 
 # --- 1. 出席番号による初期ルートの負荷分散 ---
 attendance_type = st.radio(
@@ -50,7 +52,6 @@ attendance_type = st.radio(
     horizontal=True
 )
 
-# 💡 初期設定として無料枠（F0）のキーをセット
 if "奇数" in attendance_type:
     initial_key = st.secrets["KEY_KISU"]
 else:
@@ -78,7 +79,6 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        # 大元シートの「マスタ」タブから設定情報を読み込み
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -97,7 +97,6 @@ def load_master_data():
                 mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "row_num": row_num}
         return mapping
     except Exception as e:
-        # 万が一Googleとの通信が失敗した時のバックアップ用ダミー
         return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "row_num": 2}}}
 
 master_mapping = load_master_data()
@@ -113,7 +112,6 @@ with col2:
 with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
 with col4: student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
 
-# 選択された学校・クラスの課題データを抽出
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
@@ -123,26 +121,11 @@ st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
 st.markdown(f"<div style='font-size: 19px; font-weight: bold; line-height: 1.8; color: #000000; background-color: #ffffff; padding: 25px; border: 1px solid #cbd5e0; border-radius: 12px; white-space: pre-wrap;'>{teacher_text}</div>", unsafe_allow_html=True)
 st.markdown("---")
 
-
-# --- 4. 🎧 AIお手本音声の再生機能 ---
-with st.expander("🎧 AIのお手本音声を聴く"):
-    if st.button("🔊 お手本を再生する"):
-        with st.spinner("AI音声を生成中..."):
-            try:
-                speech_config = speechsdk.SpeechConfig(subscription=initial_key, region=azure_region)
-                speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
-                speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
-                result = speech_synthesizer.speak_text_async(teacher_text).get()
-                if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                    st.audio(result.audio_data, format="audio/wav", autoplay=True)
-            except Exception as tts_error: st.error(f"エラー: {tts_error}")
-
-
 st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 5. Azure AI音声解析 ＆ 12秒S0自動避難（エスケープ）ロジック ---
+# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -156,12 +139,10 @@ if audio_value:
             f.write(audio_bytes)
             
         try:
-            # ⏱️ 12秒タイムアウト監視の初期化
             start_time = time.time()
             timeout_limit = 12.0
             final_key = initial_key  
             
-            # Azure接続設定
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
             pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA"}}')
@@ -170,19 +151,15 @@ if audio_value:
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
             
-            # 非同期で解析リクエストを送信
             recognition_future = speech_recognizer.recognize_once_async()
             
-            # 🔄 処理完了までループを回して監視（12秒リミット）
             while not recognition_future.is_done():
                 elapsed_time = time.time() - start_time
                 if elapsed_time >= timeout_limit:
-                    # ⚡ 12秒をオーバーしたら有料枠（S0）へ緊急切り替え！
                     status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
-                    
                     speech_recognizer.stop_continuous_recognition_async()
                     
-                    final_key = st.secrets["KEY_S0"]  # キーを有料枠へすり替える
+                    final_key = st.secrets["KEY_S0"]  # 有料枠へすり替え
                     speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
                     speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
                     pronunciation_config.apply_to(speech_recognizer)
@@ -214,6 +191,7 @@ if audio_value:
                                     katakana_warnings.append(f"**{word.word}**")
                                     break
                 
+                # 🔒 点数固定用のセッションステート保存
                 st.session_state.saved_results = {
                     "final_score": final_score, "score_acc": score_acc, "score_flu": score_flu, "score_pros": score_pros, "score_comp": score_comp,
                     "words_data": words_data, "mispronounced_words": mispronounced_words, "katakana_warnings": katakana_warnings, "audio_bytes": audio_bytes, "unit_name": teacher_unit
@@ -224,12 +202,12 @@ if audio_value:
         finally:
             if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
 
-    # 画面への結果フィードバック
+    # --- 🔒 5. 点数固定 ＆ 中学生やる気マックス応援アドバイスの表示 ---
     if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
         
-        # ⭕ 単語ごとの赤（ミス）・緑（正解）ビジュアルカラー判定
+        # ⭕ 視覚的カラー判定（赤・灰・緑）
         colored_html = "<div style='font-size: 22px; line-height: 2.0; background-color: #f8fafc; padding: 20px; border-radius: 10px; margin-top: 15px; border: 1px solid #e2e8f0; color: #000000;'>"
         for w_info in res["words_data"]:
             w_text = w_info["word"]
@@ -248,11 +226,41 @@ if audio_value:
         chart_data = pd.DataFrame({"観点": ["正確さ(音)", "流暢さ(スピード)", "抑揚(リズム)", "完成度(読み飛ばし)"], "スコア": [res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp']]})
         st.bar_chart(chart_data.set_index("観点"))
         
-        advice_text = ""
-        if res['katakana_warnings']: advice_text += f"💡 **カタカナ英語注意！** 最後は母音をつけずに子音だけで止める意識を！\n* 👉 {', '.join(list(set(res['katakana_warnings'])))}\n\n"
-        if res['final_score'] >= 85: advice_text += "🎯 すばらしい発音です！"
-        else: advice_text += "👍 ナイスチャレンジ！赤色の単語を聞き直してみよう。"
-        st.info(advice_text)
+        # 熱血アドバイス生成
+        st.markdown("---")
+        st.markdown("### 🗣️ AIアドバイザーからのメッセージ")
+        
+        scores = {
+            "声の出し方（ハッキリ度）": res['score_acc'],
+            "スピード（なめらかさ）": res['score_flu'],
+            "リズム（英語らしい強弱）": res['score_pros'],
+            "読み忘れ（最後まで）": res['score_comp']
+        }
+        weak_point = min(scores, key=scores.get)
+        advice_details = ""
+        
+        if res['katakana_warnings']:
+            advice_details += f"📢 **おっと！もったいないポイント発見！**\n単語のうしろに余計な「う」や「お」の音がくっついて、ローマ字読み（カタカナ）になっている部分があるよ。\n言葉の終わりで口をピタッと止めて、息だけで「サッ」と終わらせるイメージで言ってみよう！\n* 👉 **注意する単語：** {', '.join(list(set(res['katakana_warnings'])))}\n\n"
+        
+        if res['final_score'] >= 90:
+            advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点】の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
+        elif res['final_score'] >= 80:
+            advice_details += f"✨ **うおー！めっちゃうまい！【{res['final_score']}点】のハイレベル合格！**\n声がしっかりAIに届いているよ。あとほんの少しの「コツ」で、夢の90点オーバー・満点が狙えるぞ。次が本番だ！\n\n"
+        else:
+            advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！今のはまだ練習の第１歩。ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
+            
+        if res['final_score'] < 85:
+            advice_details += f"🎯 **【次に10点アップするための、まほうの裏ワザ】**\n"
+            if weak_point == "声の出し方（ハッキリ度）":
+                advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
+            elif weak_point == "スピード（なめらかさ）":
+                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止まっちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
+            elif weak_point == "リズム（英語らしい強弱）":
+                advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
+            elif weak_point == "読み忘れ（最後まで）":
+                advice_details += "👉 **『ゴールラインまで全力ダッシュ作戦』で行こう！**\n画面の「灰色の文字」は、AIが聞き取れなかった（読み飛ばしちゃった）ところだよ。恥ずかしがらずに、文の最後のピリオドまで、1つずつの単語を丁寧にハッキリ声に出してみてね！"
+        
+        st.info(advice_details)
         
         st.markdown("---")
         st.subheader("📮 先生への自動提出")
@@ -276,10 +284,11 @@ if audio_value:
                         now_jst = datetime.utcnow() + timedelta(hours=9)
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
-                        # 市教委の大元シートの「学校名」のタブへ転記（ここへ入るとGASが自動発火します）
+                        # 大元シートの学校名タブへ書き込み ➔ ここで先生のGASが自動発火！
                         sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
                         st.balloons(); st.success("🎉 提出が完了しました！")
                         
+                        # 提出完了後にセッションステートをお掃除（画面リセット）
                         if "saved_results" in st.session_state: del st.session_state.saved_results
                         if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
                         st.rerun()

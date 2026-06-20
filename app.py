@@ -103,15 +103,21 @@ master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
 
-# --- 3. 生徒の個人情報入力（プルダウン連動） ---
+# --- 3. 生徒の個人情報入力（プルダウン連動 ＆ 出席番号もプルダウン化） ---
 col1, col2, col3, col4 = st.columns(4)
-with col1: school_name = st.selectbox("学校名：", school_options)
+with col1: 
+    school_name = st.selectbox("学校名：", school_options)
 with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
-with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
-with col4: student_name = st.text_input("イニシャル：", placeholder="例: TS")
-
+with col3: 
+    # 💡 01番〜45番までのプルダウン選択肢を自動生成（「番」をつけて分かりやすく）
+    num_options = [f"{i:02d}番" for i in range(1, 46)]
+    selected_num_text = st.selectbox("出席番号：", num_options)
+    # スプレッドシートには「01」や「15」のように、数字2桁の形式で保存するために後ろの「番」をカット
+    student_num = selected_num_text.replace("番", "")
+with col4: 
+    student_name = st.text_input("イニシャル：", placeholder="例:TS")
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]

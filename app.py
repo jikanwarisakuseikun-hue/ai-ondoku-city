@@ -122,7 +122,7 @@ with col3:
     selected_num_text = st.selectbox("出席番号：", num_options)
     student_num = selected_num_text.replace("番", "")
 with col4: 
-    student_name = st.text_input("イニシャル：", placeholder="例: TS")
+    student_name = st.text_input("ID：", placeholder="例: TS")
 
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文なし", "password": "none", "school_sheet_id": st.secrets["GOOGLE_SHEET_ID"], "school_folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 0})
 teacher_unit = current_class_data["unit"]

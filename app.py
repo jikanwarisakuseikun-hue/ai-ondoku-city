@@ -3,6 +3,7 @@ import azure.cognitiveservices.speech as speechsdk
 import os
 import io
 import time
+import re
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -79,7 +80,6 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
-        # 💡 F列（フォルダID）までまとめて取得するように拡張
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -91,8 +91,14 @@ def load_master_data():
                 unit = row[2].strip() if len(row) > 2 and row[2] else "課題"
                 txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
                 pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
-                # F列からフォルダIDを取得。未入力なら環境変数のデフォルト値を使う
-                f_id = row[5].strip() if len(row) > 5 and row[5] else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+                
+                # F列からフォルダIDを取得。空欄や日本語（記入不要など）なら「None」にしておく
+                raw_f_id = row[5].strip() if len(row) > 5 and row[5] else ""
+                # 💡【強化判定】フォルダIDは通常、英数字とハイフン・アンダースコアのみの塊（25文字以上）
+                if raw_f_id and re.match(r'^[a-zA-Z0-9\-_]{25,}$', raw_f_id):
+                    f_id = raw_f_id
+                else:
+                    f_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
                 
                 row_num = idx + 2
                 
@@ -100,7 +106,7 @@ def load_master_data():
                 mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "folder_id": f_id, "row_num": row_num}
         return mapping
     except Exception as e:
-        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "folder_id": "default", "row_num": 2}}}
+        return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 2}}}
 
 master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
@@ -124,13 +130,12 @@ with col3:
     selected_num_text = st.selectbox("出席番号：", num_options)
     student_num = selected_num_text.replace("番", "")
 with col4: 
-    student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
+    student_name = st.text_input("イニシャル：", placeholder="例: TS")
 
-# 現在選択されているクラスのマスタデータを抽出
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "folder_id": st.secrets["GOOGLE_DRIVE_FOLDER_ID"], "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
-school_folder_id = current_class_data["folder_id"] # 💡 これが各校個別のフォルダIDになります
+school_folder_id = current_class_data["folder_id"]
 
 st.markdown("---")
 st.markdown(f"### 📖 今日の課題: **{teacher_unit}**")
@@ -298,8 +303,10 @@ if audio_value:
                         filename = f"{school_name}_{class_name}_{student_num}番_{student_name}_{res['unit_name']}_{res['final_score']}点.wav"
                         media = MediaIoBaseUpload(io.BytesIO(res['audio_bytes']), mimetype='audio/wav')
                         
-                        # 💡 固定の folder_id ではなく、マスタから読んだ各校固有の school_folder_id へ送信！
-                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [school_folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
+                        # 💡 二重チェック：もし何らかの理由で学校用フォルダIDが正常な英数字でなければデフォルトに強制置換
+                        target_folder_id = school_folder_id if re.match(r'^[a-zA-Z0-9\-_]{25,}$', school_folder_id) else st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+                        
+                        uploaded_file = drive_service.files().create(body={'name': filename, 'parents': [target_folder_id]}, media_body=media, fields='id', supportsAllDrives=True).execute()
                         
                         audio_link = f"https://drive.google.com/file/d/{uploaded_file.get('id')}/view?usp=drivesdk"
                         now_jst = datetime.utcnow() + timedelta(hours=9)

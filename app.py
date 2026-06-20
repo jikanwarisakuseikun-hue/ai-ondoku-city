@@ -304,10 +304,10 @@ if audio_value:
                         st.balloons()
                         st.markdown("""
                             <div style="background-color: #ebf8ff; border: 2px solid #3182ce; padding: 30px; border-radius: 15px; text-align: center; margin-top: 20px;">
-                                <h2 style="color: #2b6cb0 !important; margin-bottom: 10px;">🎉 提出がかんりょうしました！</h2>
+                                <h2 style="color: #2b6cb0 !important; margin-bottom: 10px;">🎉 提出が完了しました！</h2>
                                 <p style="color: #2d3748 !important; font-size: 20px; font-weight: bold;">
-                                    先生のパソコン（スプレッドシート）にデータと音声がぶじに届きました。<br>
-                                    タブやブラウザを閉じて、クロームブック（タブレット）をかたづけてね！
+                                    先生のパソコン（スプレッドシート）にデータと音声が無事に届きました。<br>
+                                    
                                 </p>
                             </div>
                         """, unsafe_allow_html=True)

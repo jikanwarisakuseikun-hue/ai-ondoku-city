@@ -103,7 +103,7 @@ master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
 
-# --- 3. 生徒の個人情報入力（プルダウン連動 ＆ 出席番号もプルダウン化） ---
+# --- 3. 生徒の個人情報入力（出席番号もプルダウン化） ---
 col1, col2, col3, col4 = st.columns(4)
 with col1: 
     school_name = st.selectbox("学校名：", school_options)
@@ -111,13 +111,12 @@ with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
 with col3: 
-    # 💡 01番〜45番までのプルダウン選択肢を自動生成（「番」をつけて分かりやすく）
     num_options = [f"{i:02d}番" for i in range(1, 46)]
     selected_num_text = st.selectbox("出席番号：", num_options)
-    # スプレッドシートには「01」や「15」のように、数字2桁の形式で保存するために後ろの「番」をカット
     student_num = selected_num_text.replace("番", "")
 with col4: 
-    student_name = st.text_input("イニシャル：", placeholder="例:TS")
+    student_name = st.text_input("イニシャル：", placeholder="例: TS")
+
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
@@ -151,8 +150,10 @@ if audio_value:
             
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
-            pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA"}}')
-            pronunciation_config.enable_prosody_assessment()
+            
+            # 🛠️ 【バグ修正】引数エラーを回避するため、JSON文字列に直接Prosody（リズム）設定を内包
+            json_string = f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA","requestProsodyAssessment":true}}'
+            pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=json_string)
             
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
@@ -290,11 +291,9 @@ if audio_value:
                         now_jst = datetime.utcnow() + timedelta(hours=9)
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
-                        # 大元シートの学校名タブへ書き込み ➔ ここで先生のGASが自動発火！
                         sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
                         st.balloons(); st.success("🎉 提出が完了しました！")
                         
-                        # 提出完了後にセッションステートをお掃除（画面リセット）
                         if "saved_results" in st.session_state: del st.session_state.saved_results
                         if "current_audio_bytes" in st.session_state: del st.session_state.current_audio_bytes
                         st.rerun()

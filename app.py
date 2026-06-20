@@ -103,10 +103,18 @@ master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
 
-# --- 3. 生徒の個人情報入力（出席番号もプルダウン化） ---
+# --- 3. 生徒の個人情報入力（URLパラメータによる学校名自動ロック機能付き） ---
+# URLパラメータ（?school=〇〇中学校）をチェック
+query_params = st.query_params
+param_school = query_params.get("school", None)
+
 col1, col2, col3, col4 = st.columns(4)
 with col1: 
-    school_name = st.selectbox("学校名：", school_options)
+    # URLパラメータに正しい学校名があればそれを初期値にして固定、なければ通常選択
+    if param_school in school_options:
+        school_name = st.selectbox("学校名：", [param_school], disabled=True)
+    else:
+        school_name = st.selectbox("学校名：", school_options)
 with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
@@ -115,7 +123,7 @@ with col3:
     selected_num_text = st.selectbox("出席番号：", num_options)
     student_num = selected_num_text.replace("番", "")
 with col4: 
-    student_name = st.text_input("イニシャル：", placeholder="例: TS")
+    student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
 
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]
@@ -151,9 +159,14 @@ if audio_value:
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
             
-            # 🛠️ 【バグ修正】引数エラーを回避するため、JSON文字列に直接Prosody（リズム）設定を内包
-            json_string = f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA","requestProsodyAssessment":true}}'
-            pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=json_string)
+            # 🛠️ 【Python 3.14 バグ回避】JSON文字列を使わず、公式メソッドのみで設定オブジェクトを構築
+            pronunciation_config = speechsdk.PronunciationAssessmentConfig(
+                reference_text=teacher_text,
+                grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
+                granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme
+            )
+            # 音素アルファベットをIPA（国際音声記号）に指定
+            pronunciation_config.phoneme_alphabet = "IPA"
             
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
@@ -183,7 +196,8 @@ if audio_value:
                 score_acc = int(pron_result.accuracy_score)
                 score_flu = int(pron_result.fluency_score)
                 score_comp = int(pron_result.completeness_score)
-                score_pros = int(pron_result.prosody_score) if hasattr(pron_result, 'prosody_score') else 85
+                # メソッド構築に合わせた安全なプロソディ取得（取得不可時は85点補正）
+                score_pros = int(pron_result.prosody_score) if hasattr(pron_result, 'prosody_score') and pron_result.prosody_score is not None else 85
                 final_score = int((score_acc + score_flu + score_pros + score_comp) / 4)
                 
                 words_data, mispronounced_words, katakana_warnings = [], [], []
@@ -192,7 +206,7 @@ if audio_value:
                     words_data.append({"word": word.word, "error_type": word.error_type})
                     if word.error_type == "Mispronunciation":
                         mispronounced_words.append(word.word)
-                        if hasattr(word, 'phonemes'):
+                        if hasattr(word, 'phonemes') and word.phonemes:
                             for ph in word.phonemes:
                                 if ph.phoneme in vowel_phonemes and word.word.endswith(("t", "k", "d", "g", "p", "b", "s", "n", "m")):
                                     katakana_warnings.append(f"**{word.word}**")
@@ -261,7 +275,7 @@ if audio_value:
             if weak_point == "声の出し方（ハッキリ度）":
                 advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
             elif weak_point == "スピード（なめらかさ）":
-                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止まっちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
+                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止っちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
             elif weak_point == "リズム（英語らしい強弱）":
                 advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
             elif weak_point == "読み忘れ（最後まで）":

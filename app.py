@@ -104,13 +104,11 @@ school_options = sorted(list(master_mapping.keys()))
 
 
 # --- 3. 生徒の個人情報入力（URLパラメータによる学校名自動ロック機能付き） ---
-# URLパラメータ（?school=〇〇中学校）をチェック
 query_params = st.query_params
 param_school = query_params.get("school", None)
 
 col1, col2, col3, col4 = st.columns(4)
 with col1: 
-    # URLパラメータに正しい学校名があればそれを初期値にして固定、なければ通常選択
     if param_school in school_options:
         school_name = st.selectbox("学校名：", [param_school], disabled=True)
     else:
@@ -138,7 +136,7 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック ---
+# --- 4. Azure AI音声解析 ＆ 12秒S0自動避難ロジック（修正版） ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -159,34 +157,35 @@ if audio_value:
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
             
-            # 🛠️ 【Python 3.14 バグ回避】JSON文字列を使わず、公式メソッドのみで設定オブジェクトを構築
             pronunciation_config = speechsdk.PronunciationAssessmentConfig(
                 reference_text=teacher_text,
                 grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
                 granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme
             )
-            # 音素アルファベットをIPA（国際音声記号）に指定
             pronunciation_config.phoneme_alphabet = "IPA"
             
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
             
+            # 🛠️ 【修正】競合や例外を起こさないよう、Azure SDK公式の_is_done内部フラグで監視
             recognition_future = speech_recognizer.recognize_once_async()
             
-            while not recognition_future.is_done():
+            is_timeout = False
+            while not getattr(recognition_future, '_is_done', False):
                 elapsed_time = time.time() - start_time
                 if elapsed_time >= timeout_limit:
-                    status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
-                    speech_recognizer.stop_continuous_recognition_async()
-                    
-                    final_key = st.secrets["KEY_S0"]  # 有料枠へすり替え
-                    speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
-                    speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-                    pronunciation_config.apply_to(speech_recognizer)
-                    
-                    recognition_future = speech_recognizer.recognize_once_async()
+                    is_timeout = True
                     break
-                time.sleep(0.5)
+                time.sleep(0.2)
+            
+            if is_timeout:
+                status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
+                # タイムアウト時は安全に優先ルートのキーで再試行
+                final_key = st.secrets["KEY_S0"]
+                speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
+                speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+                pronunciation_config.apply_to(speech_recognizer)
+                recognition_future = speech_recognizer.recognize_once_async()
             
             result = recognition_future.get()
             status_placeholder.empty()
@@ -196,7 +195,6 @@ if audio_value:
                 score_acc = int(pron_result.accuracy_score)
                 score_flu = int(pron_result.fluency_score)
                 score_comp = int(pron_result.completeness_score)
-                # メソッド構築に合わせた安全なプロソディ取得（取得不可時は85点補正）
                 score_pros = int(pron_result.prosody_score) if hasattr(pron_result, 'prosody_score') and pron_result.prosody_score is not None else 85
                 final_score = int((score_acc + score_flu + score_pros + score_comp) / 4)
                 
@@ -212,7 +210,6 @@ if audio_value:
                                     katakana_warnings.append(f"**{word.word}**")
                                     break
                 
-                # 🔒 点数固定用のセッションステート保存
                 st.session_state.saved_results = {
                     "final_score": final_score, "score_acc": score_acc, "score_flu": score_flu, "score_pros": score_pros, "score_comp": score_comp,
                     "words_data": words_data, "mispronounced_words": mispronounced_words, "katakana_warnings": katakana_warnings, "audio_bytes": audio_bytes, "unit_name": teacher_unit
@@ -228,7 +225,6 @@ if audio_value:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
         
-        # ⭕ 視覚的カラー判定（赤・灰・緑）
         colored_html = "<div style='font-size: 22px; line-height: 2.0; background-color: #f8fafc; padding: 20px; border-radius: 10px; margin-top: 15px; border: 1px solid #e2e8f0; color: #000000;'>"
         for w_info in res["words_data"]:
             w_text = w_info["word"]
@@ -247,7 +243,6 @@ if audio_value:
         chart_data = pd.DataFrame({"観点": ["正確さ(音)", "流暢さ(スピード)", "抑揚(リズム)", "完成度(読み飛ばし)"], "スコア": [res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp']]})
         st.bar_chart(chart_data.set_index("観点"))
         
-        # 熱血アドバイス生成
         st.markdown("---")
         st.markdown("### 🗣️ AIアドバイザーからのメッセージ")
         
@@ -275,7 +270,7 @@ if audio_value:
             if weak_point == "声の出し方（ハッキリ度）":
                 advice_details += "👉 **『カラオケで100点を狙う作戦』で行こう！**\n画面の「赤色の文字」は、AIが少し聞き取りにくかった音だよ。デジタル教科書のお手本音声をもう一度よく聴いて、音程をそっくりそのまま真似っこする感じで、口を少し大きめに動かして言ってみよう！"
             elif weak_point == "スピード（なめらかさ）":
-                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止っちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
+                advice_details += "👉 **『単語どうしを、のりではりつける作戦』で行こう！**\n「私は・学校に・行きます」みたいにブツブツ止まっちゃうと、AIが迷子になっちゃうんだ。文字じゃなくて『ひとつの塊』として、なめらかにつなげて一気に言い切ってみよう！"
             elif weak_point == "リズム（英語らしい強弱）":
                 advice_details += "👉 **『太鼓のドラムをたたく作戦』で行こう！**\n全部の文字を同じ強さで「ロボット」みたいに読むのはNG！大事な単語だけを「ドン！」と力強く、それ以外の小さな単語（the や in など）は「トントン」と優しく読むと、一気にめちゃくちゃカッコよくなるよ！"
             elif weak_point == "読み忘れ（最後まで）":

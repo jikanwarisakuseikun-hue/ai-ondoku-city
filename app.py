@@ -110,7 +110,7 @@ with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
 with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
-with col4: student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
+with col4: student_name = st.text_input("イニシャル：", placeholder="例: TS")
 
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]

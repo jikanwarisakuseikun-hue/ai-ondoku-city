@@ -2,6 +2,7 @@ import streamlit as st
 import azure.cognitiveservices.speech as speechsdk
 import os
 import io
+import time
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -13,61 +14,37 @@ st.set_page_config(page_title="AI音読アドバイザー Max Pro", layout="cent
 # --- 🎨 画面のデザイン設定 ---
 st.markdown("""
     <style>
-    /* 全体の基本設定 */
     .stApp { background-color: #ffffff; color: #1a202c; }
     h1, h2, h3 { color: #1a365d !important; font-weight: 700; }
     p, li, label, .stMarkdown { color: #2d3748 !important; font-size: 18px; line-height: 1.6; }
-    
-    /* ⭕ プルダウンを閉じてる時の枠（白背景に黒文字で強制固定） */
-    .stSelectbox>div>div>div, .stTextInput>div>div>input, .stTextArea>div>textarea {
-        background-color: #ffffff !important; 
-        color: #000000 !important;
-        border: 2px solid #cbd5e0 !important; 
-        border-radius: 8px !important;
+    .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>textarea {
+        background-color: #ffffff !important; color: #000000 !important;
+        border: 2px solid #e2e8f0 !important; border-radius: 8px !important;
     }
-    
-    /* ⭕ プルダウンを開いた時の「選択肢のリスト全体の背景」を真っ白に強制固定 */
-    div[data-baseweb="popover"] {
-        background-color: #ffffff !important;
-    }
-    div[data-baseweb="popover"] ul {
-        background-color: #ffffff !important;
-    }
-    
-    /* ⭕ 選択肢の「1文字1文字」を真っ黒に強制固定 */
-    div[data-baseweb="popover"] li {
-        color: #000000 !important; 
-        background-color: #ffffff !important;
-    }
-    
-    /* ⭕ マウスを乗せたり、スマホでタップした選択肢の背景を「薄いグレー」にする */
-    div[data-baseweb="popover"] li:hover {
-        background-color: #edf2f7 !important;
-        color: #000000 !important;
-    }
-
     .stAudioInput { background-color: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; }
     </style>
 """, unsafe_allow_html=True)
+
 st.title("🗣️ AI音読システム Max Pro")
 st.write("画面に表示されている英文を読んで、録音して提出しよう！")
 
-# --- 1. 出席番号・班による負荷分散 ---
+# --- 1. 出席番号による初期ルートの負荷分散 ---
 attendance_type = st.radio(
     "あなたの 出席番号（または班） を選んでください：",
     ["奇数番号 (1, 3, 5...)", "偶数番号 (2, 4, 6...)"],
     horizontal=True
 )
 
+# 💡 初期設定として無料枠（F0）のキーをセット
 if "奇数" in attendance_type:
-    azure_key = st.secrets["KEY_KISU"]
+    initial_key = st.secrets["KEY_KISU"]
 else:
-    azure_key = st.secrets["KEY_GUSU"]
+    initial_key = st.secrets["KEY_GUSU"]
 
 azure_region = st.secrets["AZURE_REGION"]
 
 
-# --- 2. Googleスプレッドシートからマスタを取得する機能 ---
+# --- 2. Googleスプレッドシート（市教委大元）からマスタを取得 ---
 @st.cache_data(ttl=10)
 def load_master_data():
     try:
@@ -86,6 +63,7 @@ def load_master_data():
         sheets_service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = st.secrets["GOOGLE_SHEET_ID"]
         
+        # 大元シートの「マスタ」タブから設定情報を読み込み
         result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="マスタ!A2:F200").execute()
         rows = result.get('values', [])
         
@@ -97,7 +75,6 @@ def load_master_data():
                 unit = row[2].strip() if len(row) > 2 and row[2] else "課題"
                 txt = row[3].strip() if len(row) > 3 and row[3] else "English text here."
                 pwd = row[4].strip() if len(row) > 4 and row[4] else "sensei777"
-                file_id = row[5].strip() if len(row) > 5 and row[5] else "記入不要"
                 
                 row_num = idx + 2
                 
@@ -105,24 +82,23 @@ def load_master_data():
                 mapping[sch][cls] = {"unit": unit, "text": txt, "password": pwd, "row_num": row_num}
         return mapping
     except Exception as e:
+        # 万が一Googleとの通信が失敗した時のバックアップ用ダミー
         return {"A中学校": {"1A": {"unit": "Unit 1", "text": "Welcome to school.", "password": "pass", "row_num": 2}}}
 
 master_mapping = load_master_data()
 school_options = sorted(list(master_mapping.keys()))
 
 
-# --- 3. 生徒の個人情報入力 ---
+# --- 3. 生徒の個人情報入力（プルダウン連動） ---
 col1, col2, col3, col4 = st.columns(4)
 with col1: school_name = st.selectbox("学校名：", school_options)
 with col2:
     available_classes = sorted(list(master_mapping.get(school_name, {}).keys()))
     class_name = st.selectbox("クラス：", available_classes)
-with col3: 
-    # ⭕ 出席番号を手入力から「01〜40」のプルダウンに変更
-    num_options = [f"{i:02d}" for i in range(1, 41)]  # 01, 02, ..., 40 を自動生成
-    student_num = st.selectbox("出席番号：", num_options)
-with col4: student_name = st.text_input("イニシャル：", placeholder="例: AT")
+with col3: student_num = st.text_input("出席番号：", placeholder="例: 05")
+with col4: student_name = st.text_input("氏名：", placeholder="例: 田中太郎")
 
+# 選択された学校・クラスの課題データを抽出
 current_class_data = master_mapping.get(school_name, {}).get(class_name, {"unit": "未設定", "text": "英文が登録されていません。", "password": "none", "row_num": 0})
 teacher_unit = current_class_data["unit"]
 teacher_text = current_class_data["text"]
@@ -138,7 +114,7 @@ with st.expander("🎧 AIのお手本音声を聴く"):
     if st.button("🔊 お手本を再生する"):
         with st.spinner("AI音声を生成中..."):
             try:
-                speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
+                speech_config = speechsdk.SpeechConfig(subscription=initial_key, region=azure_region)
                 speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
                 speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
                 result = speech_synthesizer.speak_text_async(teacher_text).get()
@@ -151,22 +127,57 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 5. Azure AI音声解析＆カタカナ検知ロジック ---
+# --- 5. Azure AI音声解析 ＆ 12秒S0自動避難（エスケープ）ロジック ---
 if audio_value:
     audio_bytes = audio_value.read()
     
     if "current_audio_bytes" not in st.session_state or st.session_state.current_audio_bytes != audio_bytes:
         st.session_state.current_audio_bytes = audio_bytes
-        st.info("AIが分析中... 🤖")
-        with open("temp_audio.wav", "wb") as f: f.write(audio_bytes)
+        
+        status_placeholder = st.empty()
+        status_placeholder.info("AIが分析の順番を待っています... 🤖 (通常ルート)")
+        
+        with open("temp_audio.wav", "wb") as f: 
+            f.write(audio_bytes)
+            
         try:
-            speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
+            # ⏱️ 12秒タイムアウト監視の初期化
+            start_time = time.time()
+            timeout_limit = 12.0
+            final_key = initial_key  
+            
+            # Azure接続設定
+            speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
             pronunciation_config = speechsdk.PronunciationAssessmentConfig(json_string=f'{{"referenceText":"{teacher_text}","gradingSystem":"HundredMark","granularity":"Phoneme","phonemeAlphabet":"IPA"}}')
             pronunciation_config.enable_prosody_assessment()
+            
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
-            result = speech_recognizer.recognize_once_async().get()
+            
+            # 非同期で解析リクエストを送信
+            recognition_future = speech_recognizer.recognize_once_async()
+            
+            # 🔄 処理完了までループを回して監視（12秒リミット）
+            while not recognition_future.is_done():
+                elapsed_time = time.time() - start_time
+                if elapsed_time >= timeout_limit:
+                    # ⚡ 12秒をオーバーしたら有料枠（S0）へ緊急切り替え！
+                    status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
+                    
+                    speech_recognizer.stop_continuous_recognition_async()
+                    
+                    final_key = st.secrets["KEY_S0"]  # キーを有料枠へすり替える
+                    speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
+                    speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+                    pronunciation_config.apply_to(speech_recognizer)
+                    
+                    recognition_future = speech_recognizer.recognize_once_async()
+                    break
+                time.sleep(0.5)
+            
+            result = recognition_future.get()
+            status_placeholder.empty()
             
             if result.reason == speechsdk.ResultReason.RecognizedSpeech:
                 pron_result = speechsdk.PronunciationAssessmentResult(result)
@@ -192,27 +203,30 @@ if audio_value:
                     "final_score": final_score, "score_acc": score_acc, "score_flu": score_flu, "score_pros": score_pros, "score_comp": score_comp,
                     "words_data": words_data, "mispronounced_words": mispronounced_words, "katakana_warnings": katakana_warnings, "audio_bytes": audio_bytes, "unit_name": teacher_unit
                 }
+        except Exception as azure_err:
+            status_placeholder.empty()
+            st.error(f"❌ AI解析中にエラーが発生しました: {azure_err}")
         finally:
             if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
 
-    # 固定された結果を画面に表示する
+    # 画面への結果フィードバック
     if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
         
-        # ⭕【復活！】単語ごとの赤字・緑字カラー判定＆表示システム
+        # ⭕ 単語ごとの赤（ミス）・緑（正解）ビジュアルカラー判定
         colored_html = "<div style='font-size: 22px; line-height: 2.0; background-color: #f8fafc; padding: 20px; border-radius: 10px; margin-top: 15px; border: 1px solid #e2e8f0; color: #000000;'>"
         for w_info in res["words_data"]:
             w_text = w_info["word"]
             err_t = w_info["error_type"]
             if err_t == "None":
-                colored_html += f"<span style='color: #2f855a; font-weight: bold;'>{w_text} </span>"  # 正解は緑
+                colored_html += f"<span style='color: #2f855a; font-weight: bold;'>{w_text} </span>"
             elif err_t == "Mispronunciation":
-                colored_html += f"<span style='color: #e53e3e; font-weight: bold; text-decoration: underline;'>{w_text} </span>"  # ミスは赤＋下線
+                colored_html += f"<span style='color: #e53e3e; font-weight: bold; text-decoration: underline;'>{w_text} </span>"
             elif err_t == "Omission":
-                colored_html += f"<span style='color: #718096; text-decoration: line-through;'>{w_text} </span>"  # 読み飛ばしは灰色＋打ち消し線
+                colored_html += f"<span style='color: #718096; text-decoration: line-through;'>{w_text} </span>"
             else:
-                colored_html += f"<span style='color: #dd6b20;'>{w_text} </span>"  # その他はオレンジ
+                colored_html += f"<span style='color: #dd6b20;'>{w_text} </span>"
         colored_html += "</div>"
         st.markdown(colored_html, unsafe_allow_html=True)
         
@@ -247,6 +261,7 @@ if audio_value:
                         now_jst = datetime.utcnow() + timedelta(hours=9)
                         row_data = [now_jst.strftime('%Y-%m-%d %H:%M:%S'), school_name, class_name, student_num, student_name, res['unit_name'], res['final_score'], res['score_acc'], res['score_flu'], res['score_pros'], res['score_comp'], audio_link]
                         
+                        # 市教委の大元シートの「学校名」のタブへ転記（ここへ入るとGASが自動発火します）
                         sheets_service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{school_name}!A:L", valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={'values': [row_data]}).execute()
                         st.balloons(); st.success("🎉 提出が完了しました！")
                         

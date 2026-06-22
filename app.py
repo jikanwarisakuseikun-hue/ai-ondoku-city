@@ -141,7 +141,7 @@ st.subheader("🎤 録音スタート")
 audio_value = st.audio_input("ここを押して英語を読んでね")
 
 
-# --- 4. Azure AI音声解析 ＆ 4秒S0自動避難ロジック ---
+# --- 4. Azure AI音声解析 ＆ 奇数・偶数F0自動分散ロジック（単発処理版） ---
 if audio_value:
     audio_bytes = audio_value.read()
     
@@ -149,16 +149,24 @@ if audio_value:
         st.session_state.current_audio_bytes = audio_bytes
         
         status_placeholder = st.empty()
-        status_placeholder.info("AIが分析の順番を待っています... 🤖 (通常ルート)")
+        status_placeholder.info("AIが分析しています... 🤖")
         
         with open("temp_audio.wav", "wb") as f: 
             f.write(audio_bytes)
             
         try:
-            start_time = time.time()
-            timeout_limit = 4.0  # 4秒に短縮して体感スピードアップ
-            final_key = initial_key  
+            # 🎯 【F0仕分け】出席番号の奇数・偶数で使うキーを完全に分ける
+            try:
+                num_check = int(student_num)
+                if num_check % 2 == 1:
+                    final_key = st.secrets["KEY_KISU"]
+                else:
+                    final_key = st.secrets["KEY_GUSU"]
+            except:
+                # 万が一、出席番号に数字以外（未入力など）が入っていた場合のセーフティ
+                final_key = st.secrets["KEY_KISU"]
             
+            # Azure発音評定のセットアップ
             speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
             audio_config = speechsdk.audio.AudioConfig(filename="temp_audio.wav")
             
@@ -172,25 +180,8 @@ if audio_value:
             speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             pronunciation_config.apply_to(speech_recognizer)
             
-            recognition_future = speech_recognizer.recognize_once_async()
-            
-            is_timeout = False
-            while not getattr(recognition_future, '_is_done', False):
-                elapsed_time = time.time() - start_time
-                if elapsed_time >= timeout_limit:
-                    is_timeout = True
-                    break
-                time.sleep(0.1)
-            
-            if is_timeout:
-                status_placeholder.warning("⚡ 混雑しているため、高速優先ルート（S0）へ切り替えています...")
-                final_key = st.secrets["KEY_S0"]
-                speech_config = speechsdk.SpeechConfig(subscription=final_key, region=azure_region)
-                speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-                pronunciation_config.apply_to(speech_recognizer)
-                recognition_future = speech_recognizer.recognize_once_async()
-            
-            result = recognition_future.get()
+            # 🚀 シンプルに1回だけリクエストを投げて結果を待つ（getで同期処理）
+            result = speech_recognizer.recognize_once_async().get()
             status_placeholder.empty()
             
             if result.reason == speechsdk.ResultReason.RecognizedSpeech:

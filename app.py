@@ -385,7 +385,7 @@ st.markdown(
         </p>
         <p style="margin-top: 0; font-size: 0.8rem; color: #718096;">
             Powered by 
-            <a href="https://azure.microsoft.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Microsoft Azure AI Speech</a> (F0 Bundle) | 
+            <a href="https://azure.microsoft.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Microsoft Azure AI Speech</a>  | 
             <a href="https://streamlit.io/" target="_blank" style="color: #4a5568; text-decoration: underline;">Streamlit Cloud</a> | 
             <a href="https://github.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">GitHub</a> | 
             <a href="https://workspace.google.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Google Workspace</a>

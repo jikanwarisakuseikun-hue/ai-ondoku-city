@@ -381,7 +381,7 @@ st.markdown(
             Copyright © 2026 Max Pro Project / Shogo Takeuchi All Rights Reserved.
         </p>
         <p style="margin-top: 0; margin-bottom: 4px;">
-            <strong>AI音読システム Max Pro</strong> — Designed for Saku City Schools
+            <strong>AI音読システム Max Pro</strong> 
         </p>
         <p style="margin-top: 0; font-size: 0.8rem; color: #718096;">
             Powered by 

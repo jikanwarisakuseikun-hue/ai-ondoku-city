@@ -1,6 +1,6 @@
 # =================================================================
 #  AI音読システム Max Pro (Version 1.0)
-#  Developed by [先生のお名前 / 学校名] (2026)
+#  Developed by [Shogo Takeuchi] (2026)
 #  
 #  [著作権について]
 #  本プログラムの著作権および知的財産権は開発者に帰属します。
@@ -378,7 +378,7 @@ st.markdown(
     """
     <div style="text-align: center; color: #718096; font-size: 0.85rem; line-height: 1.8;">
         <p style="margin-bottom: 4px; font-weight: bold; color: #4a5568;">
-            Copyright © 2026 Max Pro Project / Saku City Educational Board. All Rights Reserved.
+            Copyright © 2026 Max Pro Project / Shogo Takeuchi All Rights Reserved.
         </p>
         <p style="margin-top: 0; margin-bottom: 4px;">
             <strong>AI音読システム Max Pro</strong> — Designed for Saku City Schools

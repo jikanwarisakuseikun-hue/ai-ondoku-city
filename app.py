@@ -1,3 +1,12 @@
+# =================================================================
+#  AI音読システム Max Pro (Version 1.0)
+#  Developed by [先生のお名前 / 学校名] (2026)
+#  
+#  [著作権について]
+#  本プログラムの著作権および知的財産権は開発者に帰属します。
+#  開発者の許可なく、第三者への再配布、商用利用、転載を行うことを禁じます。
+# =================================================================
+
 import streamlit as st
 import azure.cognitiveservices.speech as speechsdk
 import os
@@ -243,7 +252,7 @@ if audio_value:
         if res['katakana_warnings']:
             advice_details += f"📢 **おっと！もったいないポイント発見！**\n単語のうしろに余計な「う」や「お」の音がくっついて、ローマ字読み（カタカナ）になっている部分があるよ。\n言葉の終わりで口をピタッと止めて、息だけで「サッ」と終わらせるイメージで言ってみよう！\n* 👉 **注意する単語：** {', '.join(list(set(res['katakana_warnings'])))}\n\n"
         
-        if res['final_score'] >= 90: advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点']の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
+        if res['final_score'] >= 90: advice_details += f"🏅 **す、すごすぎるーー！！【{res['final_score']}点】の神発音です！**\n耳がめちゃくちゃ良い証拠だね！先生もビックリの最高クオリティ。この調子でどんどん自信を持っていこう！絶対に英語が得意になるよ！\n\n"
         elif res['final_score'] >= 80: advice_details += f"✨ **うおー！めっちゃうまい！【{res['final_score']}点】のハイレベル合格！**\n声がしっかりAIに届いているよ。あとほんの少しの「コツ」で、夢の90点オーバー・満点が狙えるぞ。次が本番だ！\n\n"
         else: advice_details += f"👍 **ナイスチャレンジ！よく頑張って声をだしたね！**\nまずは挑戦した自分に拍手！今のはまだ練習の第１歩。ここから絶対に点数は上がるから、デジタル教科書のお手本音声をもう一度よく聴いて、下の【まほうの裏ワザ】を試してみて！\n\n"
             
@@ -361,3 +370,30 @@ with st.expander("🛠️ 先生用・管理者メニュー（課題の変更）
                         st.error(f"❌ スプレッドシートの更新に失敗しました: {update_err}")
         else:
             st.error("❌ パスワードが違います。")
+
+
+# --- 7. 著作権 ＆ クレジット表記（フッター） ---
+st.markdown("---")  # 区切り線
+st.markdown(
+    """
+    <div style="text-align: center; color: #718096; font-size: 0.85rem; line-height: 1.8;">
+        <p style="margin-bottom: 4px; font-weight: bold; color: #4a5568;">
+            Copyright © 2026 Max Pro Project / Saku City Educational Board. All Rights Reserved.
+        </p>
+        <p style="margin-top: 0; margin-bottom: 4px;">
+            <strong>AI音読システム Max Pro</strong> — Designed for Saku City Schools
+        </p>
+        <p style="margin-top: 0; font-size: 0.8rem; color: #718096;">
+            Powered by 
+            <a href="https://azure.microsoft.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Microsoft Azure AI Speech</a> (F0 Bundle) | 
+            <a href="https://streamlit.io/" target="_blank" style="color: #4a5568; text-decoration: underline;">Streamlit Cloud</a> | 
+            <a href="https://github.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">GitHub</a> | 
+            <a href="https://workspace.google.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Google Workspace</a>
+        </p>
+        <p style="font-size: 0.75rem; color: #a0aec0; letter-spacing: 0.05em;">
+            [ 安全性定義：データ非蓄積型インフラ構造 / 個人情報外部非保持設計 ]
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)

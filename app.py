@@ -1,5 +1,5 @@
 # =================================================================
-#  AI音読システム Max Pro (Version 1.0)
+#  AI音読システム Max Pro (Version 1.1) - 85点固定エラー改善版
 #  Developed by [Shogo Takeuchi] (2026)
 #  
 #  [著作権について]
@@ -198,7 +198,17 @@ if audio_value:
                 score_acc = int(pron_result.accuracy_score)
                 score_flu = int(pron_result.fluency_score)
                 score_comp = int(pron_result.completeness_score)
-                score_pros = int(pron_result.prosody_score) if hasattr(pron_result, 'prosody_score') and pron_result.prosody_score is not None else 85
+                
+                # --- 🎯 【改善箇所】単語ごとの正確さスコアの平均値から抑揚を逆算補完 ---
+                if hasattr(pron_result, 'prosody_score') and pron_result.prosody_score is not None:
+                    score_pros = int(pron_result.prosody_score)
+                else:
+                    valid_word_scores = [w.accuracy_score for w in pron_result.words if w.accuracy_score is not None]
+                    if valid_word_scores:
+                        score_pros = int(sum(valid_word_scores) / len(valid_word_scores))
+                    else:
+                        score_pros = int((score_acc + score_flu) / 2)
+                
                 final_score = int((score_acc + score_flu + score_pros + score_comp) / 4)
                 
                 words_data, mispronounced_words, katakana_warnings = [], [], []
@@ -223,7 +233,7 @@ if audio_value:
         finally:
             if os.path.exists("temp_audio.wav"): os.remove("temp_audio.wav")
 
-    # --- 🔒 5. 点数固定 ＆ 中学生応援アドバイス ---
+    # --- 🔒 5. 点数固定解消 ＆ 中学生応援アドバイス ---
     if "saved_results" in st.session_state and st.session_state.saved_results:
         res = st.session_state.saved_results
         st.markdown(f"<div style='background-color: #f0fff4; padding: 20px; border-radius: 12px; text-align: center;'><span style='font-size: 48px; font-weight: bold; color: #2f855a;'>{res['final_score']}点</span></div>", unsafe_allow_html=True)
@@ -385,9 +395,9 @@ st.markdown(
         </p>
         <p style="margin-top: 0; font-size: 0.8rem; color: #718096;">
             Powered by 
-            <a href="https://azure.microsoft.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Microsoft Azure AI Speech</a>  | 
-            <a href="https://streamlit.io/" target="_blank" style="color: #4a5568; text-decoration: underline;">Streamlit Cloud</a> | 
-            <a href="https://github.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">GitHub</a> | 
+            <a href="https://azure.microsoft.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Microsoft Azure AI Speech</a>  |  
+            <a href="https://streamlit.io/" target="_blank" style="color: #4a5568; text-decoration: underline;">Streamlit Cloud</a> |  
+            <a href="https://github.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">GitHub</a> |  
             <a href="https://workspace.google.com/" target="_blank" style="color: #4a5568; text-decoration: underline;">Google Workspace</a>
         </p>
         <p style="font-size: 0.75rem; color: #a0aec0; letter-spacing: 0.05em;">
